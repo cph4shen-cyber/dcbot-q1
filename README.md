@@ -50,8 +50,8 @@ python bot.py
 ### .env Dosyası
 
 ```env
-DISCORD_TOKEN=buraya_discord_token_yapistir
-ANTHROPIC_API_KEY=buraya_anthropic_api_key_yapistir   # isteğe bağlı
+DISCORD_TOKEN=<DISCORD_TOKEN>
+ANTHROPIC_API_KEY=<API_KEY>   # isteğe bağlı
 DB_PATH=messages.db                                   # isteğe bağlı
 ```
 
