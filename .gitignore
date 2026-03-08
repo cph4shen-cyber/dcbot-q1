@@ -1,0 +1,35 @@
+# Ortam değişkenleri (GİZLİ - asla commit etme)
+.env
+
+# Veritabanı (kullanıcı verisi içerir)
+*.db
+*.sqlite
+
+# Python önbellek
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Sanal ortam
+venv/
+.venv/
+env/
+.env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code proje dosyası
+CLAUDE.md
+
+# Geliştirme/pazarlama materyali
+*.presskit.html
+*-presskit.html
