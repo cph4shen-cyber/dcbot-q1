@@ -117,6 +117,57 @@ class MessageAnalyzer:
             "top_words": top_words,
         }
 
+    async def extract_keywords(self, question: str) -> list:
+        """Sorudan arama anahtar kelimelerini çıkarır.
+        ANTHROPIC_API_KEY varsa Claude Haiku kullanır, yoksa yerel çıkarım yapar.
+        """
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if api_key:
+            return await self._extract_keywords_ai(question, api_key)
+        return self._extract_keywords_local(question)
+
+    def _extract_keywords_local(self, question: str) -> list:
+        query_stops = STOP_WORDS | {
+            "kimler", "kim", "kadar", "neler", "neden", "hangi", "olan",
+            "hakkında", "konusunda", "ilgili", "ilgilenen", "ilgileniyor",
+            "who", "what", "why", "how", "which", "about", "many", "much",
+        }
+        words = re.findall(r'\b[a-zA-ZğüşıöçĞÜŞİÖÇ]{3,}\b', question.lower())
+        return [w for w in words if w not in query_stops][:5]
+
+    async def _extract_keywords_ai(self, question: str, api_key: str) -> list:
+        prompt = (
+            "Aşağıdaki sorudan Discord mesaj veritabanında aranacak 3-5 anahtar kelimeyi çıkar. "
+            "Eş anlamlıları ve kök biçimlerini de ekle. "
+            "Sadece virgülle ayrılmış küçük harf kelimeler yaz, başka hiçbir şey ekleme.\n\n"
+            f"Soru: {question}"
+        )
+        headers = {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+        body = {
+            "model": "claude-haiku-4-5-20251001",
+            "max_tokens": 80,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers=headers,
+                    json=body,
+                ) as resp:
+                    if resp.status != 200:
+                        return self._extract_keywords_local(question)
+                    data = await resp.json()
+                    raw = data["content"][0]["text"]
+                    keywords = [k.strip().lower() for k in raw.split(",") if k.strip()]
+                    return keywords[:5] if keywords else self._extract_keywords_local(question)
+        except Exception:
+            return self._extract_keywords_local(question)
+
     async def ai_deep_analysis(self, messages: list) -> str:
         api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:

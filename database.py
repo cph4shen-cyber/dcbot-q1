@@ -122,6 +122,32 @@ class Database:
             """, (limit,)).fetchall()
         return [dict(r) for r in rows]
 
+    def get_keyword_stats_per_user(self, keywords: list) -> list:
+        """Anahtar kelimelere göre kullanıcı bazlı istatistik döner.
+
+        Her satır:
+          user_id, username, match_count, total_count, sample_messages (|||'le ayrılmış)
+        """
+        if not keywords:
+            return []
+        conditions = " OR ".join(["LOWER(content) LIKE ?" for _ in keywords])
+        params = [f"%{kw.lower()}%" for kw in keywords]
+        with self._get_conn() as conn:
+            rows = conn.execute(f"""
+                SELECT
+                    m.user_id,
+                    m.username,
+                    COUNT(*)                                              AS match_count,
+                    (SELECT COUNT(*) FROM messages WHERE user_id = m.user_id) AS total_count,
+                    GROUP_CONCAT(SUBSTR(m.content, 1, 120), '|||')        AS sample_messages
+                FROM messages m
+                WHERE {conditions}
+                GROUP BY m.user_id
+                ORDER BY match_count DESC
+                LIMIT 10
+            """, params).fetchall()
+        return [dict(r) for r in rows]
+
     def delete_user_data(self, user_id) -> int:
         with self._get_conn() as conn:
             cur = conn.execute(

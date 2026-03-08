@@ -34,7 +34,10 @@ SENTIMENT_EMOJI = {
 
 @bot.event
 async def on_ready():
-    await tree.sync()
+    for guild in bot.guilds:
+        tree.copy_global_to(guild=guild)
+        synced = await tree.sync(guild=guild)
+        print(f"Guild sync: {guild.name} — {len(synced)} komut")
     print(f"Bot hazır: {bot.user} (ID: {bot.user.id})")
 
 
@@ -223,6 +226,135 @@ async def istatistik(interaction: discord.Interaction):
     embed.add_field(name="Benzersiz Kullanıcı",   value=str(stats["unique_users"]),   inline=True)
     embed.add_field(name="Benzersiz Kanal",        value=str(stats["unique_channels"]),inline=True)
     await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+# ── SORGU UI ───────────────────────────────────────────────────────────────────
+
+class SorguUserSelect(discord.ui.Select):
+    """Bulunan kullanıcılar arasında seçim yapıp DM şablonu oluşturur."""
+
+    def __init__(self, users: list, konu: str):
+        self.konu = konu
+        options = [
+            discord.SelectOption(
+                label=u["username"][:25],
+                value=u["user_id"],
+                description=(
+                    f"{u['match_count']} mesaj · "
+                    f"%{round(u['match_count'] / u['total_count'] * 100) if u['total_count'] else 0} ilgi"
+                )[:50],
+            )
+            for u in users[:10]
+        ]
+        super().__init__(
+            placeholder="Kullanıcı seç → iletişim şablonu oluştur",
+            min_values=1,
+            max_values=1,
+            options=options,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        user_id = self.values[0]
+        username = next((o.label for o in self.options if o.value == user_id), "kullanıcı")
+        embed = discord.Embed(
+            title=f"{username} ile İletişim",
+            description=(
+                f"<@{user_id}> adlı kullanıcıyla **{self.konu}** konusunda görüşmek için:"
+            ),
+            color=0x57F287,
+        )
+        embed.add_field(
+            name="Mention ile Etiketle",
+            value=f"<@{user_id}>",
+            inline=True,
+        )
+        embed.add_field(
+            name="Hazır Mesaj Şablonu",
+            value=f"```Merhaba! {self.konu} konusunu seninle konuşmak isterim.```",
+            inline=False,
+        )
+        embed.set_footer(text="Kullanıcı adına tıklayarak profili görüntüleyebilir ve DM gönderebilirsin.")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+class SorguView(discord.ui.View):
+    def __init__(self, users: list, konu: str):
+        super().__init__(timeout=180)
+        self.add_item(SorguUserSelect(users, konu))
+
+
+# ── SLASH KOMUTLAR (devam) ──────────────────────────────────────────────────────
+
+def _progress_bar(pct: int, width: int = 10) -> str:
+    filled = round(pct / 100 * width)
+    return "█" * filled + "░" * (width - filled)
+
+
+@tree.command(name="sorgu", description="Mesaj geçmişini doğal dille sorgula")
+@app_commands.describe(soru="Sormak istediğin şey (örn: kimler ekonomi ile ilgileniyor?)")
+async def sorgu(interaction: discord.Interaction, soru: str):
+    await interaction.response.defer(ephemeral=True)
+
+    # 1. Sorudan anahtar kelimeler çıkar
+    keywords = await analyzer.extract_keywords(soru)
+    if not keywords:
+        await interaction.followup.send(
+            "Sorgudan anahtar kelime çıkarılamadı. Daha açık bir soru dene.",
+            ephemeral=True,
+        )
+        return
+
+    # 2. Veritabanında ara
+    results = db.get_keyword_stats_per_user(keywords)
+    if not results:
+        await interaction.followup.send(
+            f"**`{', '.join(keywords)}`** ile eşleşen mesaj bulunamadı.",
+            ephemeral=True,
+        )
+        return
+
+    # 3. Rapor embed'i oluştur
+    total_matches = sum(r["match_count"] for r in results)
+
+    lines = []
+    for i, r in enumerate(results, 1):
+        relevance = round(r["match_count"] / r["total_count"] * 100) if r["total_count"] else 0
+        share = round(r["match_count"] / total_matches * 100)
+        bar = _progress_bar(relevance)
+        # Örnek mesaj (ilk eşleşme)
+        sample = ""
+        if r.get("sample_messages"):
+            first = r["sample_messages"].split("|||")[0].strip()
+            if first:
+                sample = f"\n> _{first[:80]}{'…' if len(first) > 80 else ''}_"
+        lines.append(
+            f"**{i}.** <@{r['user_id']}>\n"
+            f"`{bar}` %{relevance} ilgi · {r['match_count']} mesaj · toplam payı %{share}"
+            + sample
+        )
+
+    embed = discord.Embed(
+        title="Sorgu Raporu",
+        description=(
+            f"**Soru:** {soru}\n"
+            f"**Aranan:** `{', '.join(keywords)}`\n"
+            f"**Toplam eşleşme:** {total_matches} mesaj · {len(results)} kullanıcı"
+        ),
+        color=0x5865F2,
+    )
+    embed.add_field(
+        name="Kullanıcı Sıralaması",
+        value="\n\n".join(lines),
+        inline=False,
+    )
+    embed.set_footer(text="Aşağıdaki menüden kullanıcı seçerek iletişim şablonu oluşturabilirsin.")
+
+    konu = keywords[0] if keywords else soru[:30]
+    await interaction.followup.send(
+        embed=embed,
+        view=SorguView(results, konu),
+        ephemeral=True,
+    )
 
 
 # ── ÇALIŞTIR ───────────────────────────────────────────────────────────────────
