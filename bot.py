@@ -157,6 +157,7 @@ async def kullanici_analiz(interaction: discord.Interaction, uye: discord.Member
 
 @tree.command(name="ai_analiz", description="Claude AI ile konuşmanın derin analizini yapar")
 @app_commands.describe(adet="Kaç mesaj analiz edilsin? (varsayılan: 30)")
+@app_commands.checks.cooldown(1, 60.0, key=lambda i: i.user.id)
 async def ai_analiz(interaction: discord.Interaction, adet: int = 30):
     await interaction.response.defer(ephemeral=True)
 
@@ -301,6 +302,7 @@ def _progress_bar(pct: int, width: int = 10) -> str:
 
 @tree.command(name="sorgu", description="Mesaj geçmişini doğal dille sorgula")
 @app_commands.describe(soru="Sormak istediğin şey (örn: kimler ekonomi ile ilgileniyor?)")
+@app_commands.checks.cooldown(1, 30.0, key=lambda i: i.user.id)
 async def sorgu(interaction: discord.Interaction, soru: str):
     await interaction.response.defer(ephemeral=True)
 
@@ -364,6 +366,19 @@ async def sorgu(interaction: discord.Interaction, soru: str):
         view=SorguView(results, konu),
         ephemeral=True,
     )
+
+
+# ── HATA YÖNETİMİ ──────────────────────────────────────────────────────────────
+
+@tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.CommandOnCooldown):
+        await interaction.response.send_message(
+            f"Bu komutu çok sık kullanıyorsun. {error.retry_after:.0f} saniye sonra tekrar dene.",
+            ephemeral=True,
+        )
+    else:
+        raise error
 
 
 # ── ÇALIŞTIR ───────────────────────────────────────────────────────────────────
