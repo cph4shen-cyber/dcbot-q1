@@ -1,42 +1,38 @@
+import json
 import re
 import os
 import aiohttp
 from collections import Counter
 
-POSITIVE_WORDS = {
-    # Türkçe
-    "güzel", "harika", "mükemmel", "iyi", "süper", "muhteşem", "seviyorum",
-    "teşekkür", "bravo", "başarılı", "mutlu", "sevindim", "memnun", "olumlu",
-    "evet", "tamam", "doğru", "kesinlikle", "tabii", "elbette", "tebrikler",
-    # İngilizce
-    "good", "great", "awesome", "nice", "love", "excellent", "perfect",
-    "thanks", "thank", "wonderful", "amazing", "yes", "sure", "cool",
-    # Emoji
-    "😊", "😍", "❤️", "👍", "🎉", "✅", "💯", "🔥", "😄", "🥳",
-}
-
-NEGATIVE_WORDS = {
-    # Türkçe
-    "kötü", "berbat", "rezalet", "nefret", "sinir", "saçma", "yanlış",
-    "hata", "sorun", "problem", "üzgün", "kızgın", "hayır", "olmaz",
-    "imkansız", "korkunç", "felaket", "şikayet", "beğenmedim",
-    # İngilizce
-    "bad", "awful", "terrible", "hate", "wrong", "error", "problem",
-    "sad", "angry", "no", "never", "horrible", "disgusting", "worst",
-    # Emoji
-    "😢", "😡", "👎", "❌", "💔", "😤", "🤬", "😞", "😠",
-}
-
-STOP_WORDS = {
-    "bir", "bu", "ve", "ile", "de", "da", "ki", "mi", "mu", "mü",
-    "için", "ama", "fakat", "lakin", "ya", "veya", "hem", "ne", "nasıl",
-    "ben", "sen", "o", "biz", "siz", "onlar", "benim", "senin", "onun",
-    "the", "a", "an", "is", "are", "was", "were", "it", "to", "of",
-    "and", "or", "but", "in", "on", "at", "for", "with", "as", "by",
-}
-
-
 class MessageAnalyzer:
+    def __init__(self):
+        self.config_path = "config.json"
+        self.positive_words = set()
+        self.negative_words = set()
+        self.stop_words = set()
+        self.negation_words = set()
+        self._load_config()
+
+    def _load_config(self):
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+                self.positive_words = set(config.get("POSITIVE_WORDS", []))
+                self.negative_words = set(config.get("NEGATIVE_WORDS", []))
+                self.stop_words = set(config.get("STOP_WORDS", []))
+                self.negation_words = set(config.get("NEGATION_WORDS", []))
+        except Exception as e:
+            print(f"Uyarı: Konfigürasyon yüklenemedi ({e}). Boş listeler kullanılacak.")
+
+    def _is_match(self, word: str, word_set: set) -> bool:
+        if word in word_set:
+            return True
+        # Turkish suffix handling: check if word starts with a key root (min 4 chars)
+        for root in word_set:
+            if len(root) >= 4 and word.startswith(root):
+                return True
+        return False
+
     def analyze(self, text: str) -> dict:
         if not text or not text.strip():
             return {
@@ -50,14 +46,36 @@ class MessageAnalyzer:
             }
 
         words = re.findall(r'\b[a-zA-ZğüşıöçĞÜŞİÖÇ]{2,}\b', text.lower())
-        pos_score = sum(1 for w in words if w in POSITIVE_WORDS)
-        neg_score = sum(1 for w in words if w in NEGATIVE_WORDS)
+        pos_score = 0
+        neg_score = 0
 
-        # Emoji kontrolü ayrıca
+        for i, word in enumerate(words):
+            is_negated = False
+            
+            # Check previous word for negation (e.g., "not good", "hiç iyi")
+            if i > 0 and self._is_match(words[i-1], self.negation_words):
+                is_negated = True
+            
+            # Check next word for negation (especially Turkish "iyi değil")
+            if i < len(words) - 1 and self._is_match(words[i+1], self.negation_words):
+                is_negated = True
+
+            if self._is_match(word, self.positive_words):
+                if is_negated:
+                    neg_score += 1
+                else:
+                    pos_score += 1
+            elif self._is_match(word, self.negative_words):
+                if is_negated:
+                    pos_score += 1
+                else:
+                    neg_score += 1
+
+        # Emoji kontrolü 
         for ch in text:
-            if ch in POSITIVE_WORDS:
+            if ch in self.positive_words:
                 pos_score += 1
-            elif ch in NEGATIVE_WORDS:
+            elif ch in self.negative_words:
                 neg_score += 1
 
         if pos_score > neg_score:
@@ -99,13 +117,17 @@ class MessageAnalyzer:
 
         for msg in messages:
             result = self.analyze(msg)
-            sentiments[result["sentiment"]] += 1
+            sent_key = result["sentiment"]
+            sentiments[sent_key] += 1
             total_chars += result["char_count"]
             all_words.extend(
-                w for w in result["words"] if w not in STOP_WORDS
+                w for w in (result.get("words") or []) if w not in self.stop_words
             )
 
-        dominant = max(sentiments, key=sentiments.get)
+        dominant = "neutral"
+        if messages:
+            dominant = max(sentiments, key=lambda k: sentiments[k])
+            
         counter = Counter(all_words)
         top_words = [word for word, _ in counter.most_common(8)]
 
@@ -127,7 +149,7 @@ class MessageAnalyzer:
         return self._extract_keywords_local(question)
 
     def _extract_keywords_local(self, question: str) -> list:
-        query_stops = STOP_WORDS | {
+        query_stops = self.stop_words | {
             "kimler", "kim", "kadar", "neler", "neden", "hangi", "olan",
             "hakkında", "konusunda", "ilgili", "ilgilenen", "ilgileniyor",
             "who", "what", "why", "how", "which", "about", "many", "much",

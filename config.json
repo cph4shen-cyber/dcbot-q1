@@ -1,0 +1,32 @@
+{
+    "POSITIVE_WORDS": [
+        "güzel", "harika", "mükemmel", "iyi", "süper", "muhteşem", "seviyorum",
+        "teşekkür", "bravo", "başarılı", "mutlu", "sevindim", "memnun", "olumlu",
+        "evet", "tamam", "doğru", "kesinlikle", "tabii", "elbette", "tebrikler",
+        "iyidir", "iyiyim", "mutluyuz", "memnunuz",
+        "good", "great", "awesome", "nice", "love", "excellent", "perfect",
+        "thanks", "thank", "wonderful", "amazing", "yes", "sure", "cool",
+        "😊", "😍", "❤️", "👍", "🎉", "✅", "💯", "🔥", "😄", "🥳"
+    ],
+    "NEGATIVE_WORDS": [
+        "kötü", "berbat", "rezalet", "nefret", "sinir", "saçma", "yanlış",
+        "hata", "sorun", "problem", "üzgün", "kızgın", "hayır", "olmaz",
+        "imkansız", "korkunç", "felaket", "şikayet", "beğenmedim",
+        "kötüdür", "kötüyüm", "üzgünüz", "nefret ediyorum",
+        "bad", "awful", "terrible", "hate", "wrong", "error", "problem",
+        "sad", "angry", "no", "never", "horrible", "disgusting", "worst",
+        "😢", "😡", "👎", "❌", "💔", "😤", "🤬", "😞", "😠"
+    ],
+    "STOP_WORDS": [
+        "bir", "bu", "ve", "ile", "de", "da", "ki", "mi", "mu", "mü",
+        "için", "ama", "fakat", "lakin", "ya", "veya", "hem", "ne", "nasıl",
+        "ben", "sen", "o", "biz", "siz", "onlar", "benim", "senin", "onun",
+        "the", "a", "an", "is", "are", "was", "were", "it", "to", "of",
+        "and", "or", "but", "in", "on", "at", "for", "with", "as", "by"
+    ],
+    "NEGATION_WORDS": [
+        "değil", "hiç", "yok", "asla", "aslında", "maalesef", "hayır",
+        "değilim", "değilsin", "değilidir", "değiliz", "değilsiniz", "değiller",
+        "yoktur", "yokum", "not", "no", "never", "none", "neither", "nor", "but"
+    ]
+}

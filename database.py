@@ -1,20 +1,13 @@
-import sqlite3
+import aiosqlite
 import os
-
 
 class Database:
     def __init__(self):
         self.db_path = os.getenv("DB_PATH", "messages.db")
-        self._init_db()
 
-    def _get_conn(self):
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    def _init_db(self):
-        with self._get_conn() as conn:
-            conn.execute("""
+    async def _init_db(self):
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
                 CREATE TABLE IF NOT EXISTS messages (
                     id           INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id      TEXT NOT NULL,
@@ -32,14 +25,15 @@ class Database:
                     created_at   TEXT DEFAULT (datetime('now'))
                 )
             """)
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_user_id    ON messages(user_id)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_channel_id ON messages(channel_id)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_timestamp  ON messages(timestamp)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_user_id    ON messages(user_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_channel_id ON messages(channel_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_timestamp  ON messages(timestamp)")
+            await db.commit()
 
-    def save_message(self, user_id, username, channel_id, channel_name,
-                     content, analysis, timestamp):
-        with self._get_conn() as conn:
-            conn.execute("""
+    async def save_message(self, user_id, username, channel_id, channel_name,
+                         content, analysis, timestamp):
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
                 INSERT INTO messages
                     (user_id, username, channel_id, channel_name, content,
                      sentiment, word_count, char_count,
@@ -55,60 +49,85 @@ class Database:
                 int(analysis.get("has_emoji", False)),
                 timestamp,
             ))
+            await db.commit()
 
-    def get_channel_messages(self, channel_id, limit=50):
-        with self._get_conn() as conn:
-            rows = conn.execute("""
+    async def save_messages_bulk(self, messages_data: list):
+        """Birden fazla mesajı tek bir işlemde (transaction) kaydeder.
+        messages_data: list[tuple] formatında (user_id, username, channel_id, ...)
+        """
+        if not messages_data:
+            return
+            
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.executemany("""
+                INSERT INTO messages
+                    (user_id, username, channel_id, channel_name, content,
+                     sentiment, word_count, char_count,
+                     has_url, has_mention, has_emoji, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, messages_data)
+            await db.commit()
+
+    async def get_channel_messages(self, channel_id, limit=50):
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("""
                 SELECT * FROM messages
                 WHERE channel_id = ?
                 ORDER BY timestamp DESC
                 LIMIT ?
-            """, (channel_id, limit)).fetchall()
-        return [dict(r) for r in rows]
+            """, (channel_id, limit)) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(r) for r in rows]
 
-    def get_user_messages(self, user_id, limit=50):
-        with self._get_conn() as conn:
-            rows = conn.execute("""
+    async def get_user_messages(self, user_id, limit=50):
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("""
                 SELECT * FROM messages
                 WHERE user_id = ?
                 ORDER BY timestamp DESC
                 LIMIT ?
-            """, (user_id, limit)).fetchall()
-        return [dict(r) for r in rows]
+            """, (user_id, limit)) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(r) for r in rows]
 
-    def get_server_stats(self):
-        with self._get_conn() as conn:
-            row = conn.execute("""
+    async def get_server_stats(self):
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("""
                 SELECT
                     COUNT(*)                    AS total_messages,
                     COUNT(DISTINCT user_id)     AS unique_users,
                     COUNT(DISTINCT channel_id)  AS unique_channels
                 FROM messages
-            """).fetchone()
-        return dict(row)
+            """) as cursor:
+                row = await cursor.fetchone()
+                return dict(row)
 
-    def get_sentiment_stats(self, channel_id=None):
-        with self._get_conn() as conn:
+    async def get_sentiment_stats(self, channel_id=None):
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
             if channel_id:
-                rows = conn.execute("""
-                    SELECT sentiment, COUNT(*) as cnt
-                    FROM messages WHERE channel_id = ?
-                    GROUP BY sentiment
-                """, (channel_id,)).fetchall()
+                query = "SELECT sentiment, COUNT(*) as cnt FROM messages WHERE channel_id = ? GROUP BY sentiment"
+                params = (channel_id,)
             else:
-                rows = conn.execute("""
-                    SELECT sentiment, COUNT(*) as cnt
-                    FROM messages GROUP BY sentiment
-                """).fetchall()
-        result = {"positive": 0, "neutral": 0, "negative": 0}
-        for r in rows:
-            if r["sentiment"] in result:
-                result[r["sentiment"]] = r["cnt"]
-        return result
+                query = "SELECT sentiment, COUNT(*) as cnt FROM messages GROUP BY sentiment"
+                params = ()
+            
+            async with db.execute(query, params) as cursor:
+                rows = await cursor.fetchall()
+                
+            result = {"positive": 0, "neutral": 0, "negative": 0}
+            for r in rows:
+                if r["sentiment"] in result:
+                    result[r["sentiment"]] = r["cnt"]
+            return result
 
-    def get_top_users(self, limit=10):
-        with self._get_conn() as conn:
-            rows = conn.execute("""
+    async def get_top_users(self, limit=10):
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("""
                 SELECT
                     username,
                     COUNT(*) as msg_count,
@@ -119,21 +138,18 @@ class Database:
                 GROUP BY user_id
                 ORDER BY msg_count DESC
                 LIMIT ?
-            """, (limit,)).fetchall()
-        return [dict(r) for r in rows]
+            """, (limit,)) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(r) for r in rows]
 
-    def get_keyword_stats_per_user(self, keywords: list) -> list:
-        """Anahtar kelimelere göre kullanıcı bazlı istatistik döner.
-
-        Her satır:
-          user_id, username, match_count, total_count, sample_messages (|||'le ayrılmış)
-        """
+    async def get_keyword_stats_per_user(self, keywords: list) -> list:
         if not keywords:
             return []
         conditions = " OR ".join(["LOWER(content) LIKE ?" for _ in keywords])
         params = [f"%{kw.lower()}%" for kw in keywords]
-        with self._get_conn() as conn:
-            rows = conn.execute(f"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(f"""
                 SELECT
                     m.user_id,
                     m.username,
@@ -145,12 +161,14 @@ class Database:
                 GROUP BY m.user_id
                 ORDER BY match_count DESC
                 LIMIT 10
-            """, params).fetchall()
-        return [dict(r) for r in rows]
+            """, params) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(r) for r in rows]
 
-    def delete_user_data(self, user_id) -> int:
-        with self._get_conn() as conn:
-            cur = conn.execute(
+    async def delete_user_data(self, user_id) -> int:
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(
                 "DELETE FROM messages WHERE user_id = ?", (user_id,)
-            )
-        return cur.rowcount
+            ) as cursor:
+                await db.commit()
+                return cursor.rowcount

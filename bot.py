@@ -34,6 +34,7 @@ SENTIMENT_EMOJI = {
 
 @bot.event
 async def on_ready():
+    await db._init_db()
     for guild in bot.guilds:
         tree.copy_global_to(guild=guild)
         synced = await tree.sync(guild=guild)
@@ -46,7 +47,7 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
     analysis = analyzer.analyze(message.content)
-    db.save_message(
+    await db.save_message(
         user_id=str(message.author.id),
         username=str(message.author),
         channel_id=str(message.channel.id),
@@ -65,7 +66,7 @@ async def analiz(interaction: discord.Interaction, adet: int = 20):
     await interaction.response.defer(ephemeral=True)
     adet = min(adet, 100)
 
-    messages = db.get_channel_messages(str(interaction.channel_id), limit=adet)
+    messages = await db.get_channel_messages(str(interaction.channel_id), limit=adet)
     if not messages:
         await interaction.followup.send("Bu kanalda henüz kayıtlı mesaj yok.", ephemeral=True)
         return
@@ -114,7 +115,7 @@ async def analiz(interaction: discord.Interaction, adet: int = 20):
 async def kullanici_analiz(interaction: discord.Interaction, uye: discord.Member):
     await interaction.response.defer(ephemeral=True)
 
-    messages = db.get_user_messages(str(uye.id), limit=50)
+    messages = await db.get_user_messages(str(uye.id), limit=50)
     if not messages:
         await interaction.followup.send(f"{uye.display_name} için kayıtlı mesaj bulunamadı.", ephemeral=True)
         return
@@ -166,7 +167,7 @@ async def ai_analiz(interaction: discord.Interaction, adet: int = 30):
         )
         return
 
-    messages = db.get_channel_messages(str(interaction.channel_id), limit=adet)
+    messages = await db.get_channel_messages(str(interaction.channel_id), limit=adet)
     if not messages:
         await interaction.followup.send("Bu kanalda henüz kayıtlı mesaj yok.", ephemeral=True)
         return
@@ -195,23 +196,31 @@ async def gecmis_tara(interaction: discord.Interaction, adet: int = 100):
         return
 
     adet = min(adet, 500)
-    count = 0
+    messages_to_save = []
+    
     async for msg in interaction.channel.history(limit=adet):
         if not msg.author.bot:
             analysis = analyzer.analyze(msg.content)
-            db.save_message(
-                user_id=str(msg.author.id),
-                username=str(msg.author),
-                channel_id=str(msg.channel.id),
-                channel_name=msg.channel.name,
-                content=msg.content,
-                analysis=analysis,
-                timestamp=msg.created_at.isoformat(),
-            )
-            count += 1
+            messages_to_save.append((
+                str(msg.author.id),
+                str(msg.author),
+                str(msg.channel.id),
+                msg.channel.name,
+                msg.content,
+                analysis.get("sentiment"),
+                analysis.get("word_count"),
+                analysis.get("char_count"),
+                int(analysis.get("has_url", False)),
+                int(analysis.get("has_mention", False)),
+                int(analysis.get("has_emoji", False)),
+                msg.created_at.isoformat(),
+            ))
+
+    if messages_to_save:
+        await db.save_messages_bulk(messages_to_save)
 
     await interaction.followup.send(
-        f"{count} mesaj tarandı ve veritabanına kaydedildi.",
+        f"{len(messages_to_save)} mesaj tarandı ve toplu olarak veritabanına kaydedildi.",
         ephemeral=True,
     )
 
@@ -220,7 +229,7 @@ async def gecmis_tara(interaction: discord.Interaction, adet: int = 100):
 async def istatistik(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
 
-    stats = db.get_server_stats()
+    stats = await db.get_server_stats()
     embed = discord.Embed(title="Sunucu İstatistikleri", color=0xFEE75C)
     embed.add_field(name="Toplam Kayıtlı Mesaj", value=str(stats["total_messages"]), inline=True)
     embed.add_field(name="Benzersiz Kullanıcı",   value=str(stats["unique_users"]),   inline=True)
@@ -305,7 +314,7 @@ async def sorgu(interaction: discord.Interaction, soru: str):
         return
 
     # 2. Veritabanında ara
-    results = db.get_keyword_stats_per_user(keywords)
+    results = await db.get_keyword_stats_per_user(keywords)
     if not results:
         await interaction.followup.send(
             f"**`{', '.join(keywords)}`** ile eşleşen mesaj bulunamadı.",
